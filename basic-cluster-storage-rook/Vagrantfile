@@ -1,0 +1,135 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+ENV['VAGRANT_NO_PARELLEL']              = 'yes'
+ENV['VAGRANT_BOX_UPDATE_CHECK_DISABLE'] = 'yes'
+ENV['VAGRANT_DEFAULT_PROVIDER']         = 'libvirt'
+
+#VAGRANT_BOX                             = "centos/7"
+#VAGRANT_BOX_VERSION                     = "2004.01"
+#VAGRANT_BOX                             = "centos/8"
+#VAGRANT_BOX_VERSION                     = "2011.0"
+#VAGRANT_BOX                             = "rockylinux/8"
+#VAGRANT_BOX_VERSION                     = "7.0.0"
+#VAGRANT_BOX                             = "rockylinux/9"
+#VAGRANT_BOX_VERSION                     = "1.0.0"
+VAGRANT_BOX                             = "generic/rocky9"
+VAGRANT_BOX_VERSION                     = "4.2.14"
+VIRTUAL_CPUS                            = 2
+VIRTUAL_MEMORY                          = 2048
+VIRTUAL_NETWORK                         = "172.16.16"
+VIRTUAL_DOMAIN                          = "example.com"
+
+vms = {
+  "nodes" => {
+    "control-plane" => {
+      "01" => {
+        cpus: VIRTUAL_CPUS,
+        memory: VIRTUAL_MEMORY,
+        ip: "#{VIRTUAL_NETWORK}.2",
+      }
+    },
+    "worker" => {
+      "01" => {
+        cpus: VIRTUAL_CPUS,
+        memory: VIRTUAL_MEMORY,
+        ip: "#{VIRTUAL_NETWORK}.12",
+      },
+      "02" => {
+        cpus: VIRTUAL_CPUS,
+        memory: VIRTUAL_MEMORY,
+        ip: "#{VIRTUAL_NETWORK}.13",
+      },
+      "03" => {
+        cpus: VIRTUAL_CPUS,
+        memory: VIRTUAL_MEMORY,
+        ip: "#{VIRTUAL_NETWORK}.14",
+      },
+    }
+	}
+}
+
+inventory_groups = {
+  "all:vars" => {
+    "calico_ip_pool" => "192.168.0.0/16",
+    "cp_network_cidr" => "192.168.0.0/16",
+    "disable_selinux" => "yes",
+    "load_balancer_address" => "192.168.121.2",
+    "main_control_plane" => "control-plane-01",
+    "main_control_plane_ip" => "",
+    "main_control_plane_nic" => "eth0",
+    "main_load_balancer_nic" => "eth0",
+    "pod_network_cidr" => "192.168.0.0/16",
+    "satellite_managed" => "False",
+    "service_cidr" => "10.96.0.0/16",
+    "use_proxy" => "no",
+  },
+  "control_plane" => [
+    "control-plane01"
+  ],
+  "worker" => [
+    "worker01",
+    "worker02",
+    "worker03"
+  ]
+}
+
+Vagrant.configure("2") do |config|
+
+  config.vm.provision "ansible" do |ansible|
+    ansible.groups = inventory_groups
+    ansible.playbook = "provision.yml"
+    ansible.become = true
+    ansible.become_user = "root"
+	end
+
+  vms.each_pair do |vm_group_name, vm_group|
+
+    if vm_group_name == "nodes"
+
+      vm_group.each_pair do |node_type_name, node_type_group|
+
+        node_type_group.each_pair do |node_name, node_config|
+
+          config.vm.define "#{node_type_name}-#{node_name}" do |node|
+
+            # Generic, global VM configuration
+            node.vm.box = VAGRANT_BOX
+            node.vm.box_version = VAGRANT_BOX_VERSION
+            node.vm.hostname = "#{node_type_name}-#{node_name}.#{VIRTUAL_DOMAIN}"
+            node.vm.network "private_network", ip: node_config[:ip]
+
+            if node_type_name == "control-plane"
+
+              # Generic control-plane node specific configuration
+
+              node.vm.provider :libvirt do |provider|
+                # Do something specific to libvirt
+                provider.nested = true
+              end
+
+              node.vm.provider :virtualbox do |provider|
+                # Do something specific to virtualbox
+              end
+
+            end
+
+            if node_type_name == "worker"
+
+              # Generic worker node specific configuration
+
+              node.vm.provider :libvirt do |provider|
+                provider.nested = true
+                provider.storage :file, :size => "20G"
+              end
+
+              node.vm.provider :virtualbox do |provider|
+                provider.disk :disk, size: "20GB"
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
