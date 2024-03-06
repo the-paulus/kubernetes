@@ -1,0 +1,50 @@
+---
+- hosts: all
+  become: yes
+  become_user: root
+  become_method: sudo
+  gather_facts: yes
+  tasks:
+    - name: "Disable SELinux completely (old way)"
+      ansible.builtin.lineinfile:
+        path: "/etc/sysconfig/selinux"
+        regexp: "^SELINUX=.*"
+        line: "SELINUX=disabled"
+      when: disable_selinux is defined and disable_selinux
+
+    - name: "Disable SELinux completely (new way)"
+      ansible.builtin.shell: "grubby --update-kernel ALL --args selinux=0"
+      when: disable_selinux is defined and disable_selinux
+
+    - name: "Set timezone"
+      ansible.builtin.shell: "timedatectl set-timezone {{ timezone }}"
+
+    - name: "Enable NTP"
+      ansible.builtin.shell: "timedatectl set-ntp 1"
+
+    - name: "Ensure that system time is correct"
+      ansible.builtin.shell: "chronyc makestep"
+
+    - name: "Update system packages"
+      ansible.builtin.package:
+        name: "*"
+        state: latest
+
+    - name: "Turn off SWAP"
+      ansible.builtin.shell: "swapoff -a"
+
+    - name: "Disable SWAP in fstab"
+      ansible.builtin.replace:
+        path: "/etc/fstab"
+        regexp: '^([^#].*?\sswap\s+.*)$'
+        replace: '# \1'
+
+    - name: "Stop and Disable firewall (firewalld)"
+      ansible.builtin.service:
+        name: "firewalld"
+        state: stopped
+        enabled: no
+
+    - name: "Reboot system"
+      ansible.builtin.reboot:
+        reboot_timeout: 120
