@@ -1,0 +1,22 @@
+---
+default_nic: "eth0"
+disable_selinux: yes
+kernel_modules:
+- br_netfilter
+- overlay
+- ip_vs
+- ip_vs_rr
+- ip_vs_wrr
+- ip_vs_sh
+- nf_conntrack
+kubernetes_packages:
+  - kubelet
+  - kubeadm
+  - kubectl
+kubernetes_version: "1.29"
+packages: []
+required_packages:
+- vim
+- wget
+- curl
+- gnupg
