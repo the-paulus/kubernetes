@@ -1,0 +1,8 @@
+---
+- name: "Vagrant Provisioning Playbook"
+  hosts: all
+  tasks:
+    - name: "Generate Vagrant inventory file"
+      ansible.builtin.debug:
+        msg: "Now run `ansible-playbook cluster.yml`"
+      run_once: yes
