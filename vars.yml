@@ -1,4 +1,5 @@
 ---
+calico_version: "v3.26.3"
 default_nic: "eth0"
 disable_selinux: yes
 kernel_modules:
