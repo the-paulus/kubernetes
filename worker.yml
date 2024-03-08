@@ -1,0 +1,18 @@
+---
+- hosts: worker
+  become: yes
+  become_user: root
+  become_method: sudo
+  vars_files:
+    - "vars.yml"
+  tasks:
+    - name: "Upload Node Join Command"
+      ansible.builtin.copy:
+        src: "./files/node-join.sh"
+        dest: "/node-join.sh"
+        owner: "root"
+        group: "root"
+        mode: "0777"
+
+    - name: Join node to cluster
+      ansible.builtin.shell: "/node-join.sh > /dev/null 2&>1"
