@@ -1,8 +1,8 @@
 ---
-- name: "Include \"Prepare\" Playbook"
+- name: "Include Prepare Playbook"
   ansible.builtin.import_playbook: "../prepare.yml"
 
-- name: "Include Bootstrap Playbook"
+- name: "Include Setup Playbook"
   ansible.builtin.import_playbook: "../setup.yml"
 
 - name: "Include Control Plane Playbook"
