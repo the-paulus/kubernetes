@@ -1,0 +1,124 @@
+---
+- hosts: control_plane
+  become: yes
+  become_user: root
+  become_method: sudo
+  serial: 1
+  vars_files:
+    - "vars.yml"
+  pre_tasks:
+    # Generate the kubeadm init parameters when there is only one control plane.
+    - name: "Set API Server Advertise IP"
+      ansible.builtin.set_fact:
+        main_control_plane_ip: "{{ hostvars[inventory_hostname]['ansible_'~main_control_plane_nic].ipv4.address }}"
+      when: groups['control_plane']|length == 1 and (main_control_plane_nic is defined and inventory_hostname == main_control_plane)
+
+    - name: "Add API Server Advertise to kubeadm init parameters"
+      ansible.builtin.set_fact:
+        kubeadm_init_params: "--apiserver-advertise-address={{ main_control_plane_ip }}"
+      when: groups['control_plane']|length == 1 and (main_control_plane_ip is defined and inventory_hostname == main_control_plane)
+
+    - name: "Add Pod network CIDR to kubeadm init parameters"
+      ansible.builtin.set_fact:
+        kubeadm_init_params: "{{ kubeadm_init_params }} --pod-network-cidr={{ pod_network_cidr }}"
+      when: groups['control_plane']|length == 1 and (pod_network_cidr is defined and inventory_hostname == main_control_plane)
+
+    # Generate the kubeadm init parameters when there is more than one control plane.
+    - name: "Set the Control Plane Endpoint"
+      ansible.builtin.set_fact:
+        kubeadm_init_params: "--control-plane-endpoint \"{{ load_balancer_address }}\" --upload-certs"
+      when: groups['control_plane']|length > 1
+
+    - name: "Add Pod Network CIDR"
+      ansible.builtin.set_fact:
+        kubeadm_init_params: "{{ kubeadm_init_params }} --pod-network-cidr={{ pod_network_cidr }}"
+      when: groups['control_plane']|length > 1 and pod_network_cidr is defined
+
+  tasks:
+    - name: "Pull required containers"
+      ansible.builtin.shell: "kubeadm config images pull >/dev/null 2>&1"
+
+    - name: "Initialize Kubernetes Cluster"
+      ansible.builtin.shell: "kubeadm init {{ kubeadm_init_params }} | tee /root/kubeinit.log | grep \"\\-\\-certificate-key\" | cut -d' ' -f3"
+      register: kubeadm_certificate_key
+      when: inventory_hostname == main_control_plane
+
+    - name: "Save Certificate Key to Variable"
+      ansible.builtin.set_fact:
+        kubeadm_certificate_key: "{{ kubeadm_certificate_key.stdout }}"
+      when: inventory_hostname == main_control_plane
+
+    - name: "Install the Tigera Calico operator"
+      ansible.builtin.shell: "kubectl --kubeconfig=/etc/kubernetes/admin.conf create -f https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml >/dev/null 2>&1"
+      when: inventory_hostname == main_control_plane
+      ignore_errors: yes
+
+    - name: "Upload custom-resources.yaml"
+      ansible.builtin.template:
+        src: 'templates/calico-custom-resources.yml.j2'
+        dest: '/root/calico-custom-resources.yml'
+      when: inventory_hostname == main_control_plane
+
+    - name: "Create /root/.kube directory"
+      ansible.builtin.file:
+        state: directory
+        path: "/root/.kube"
+        owner: "root"
+        group: "root"
+      when: inventory_hostname == main_control_plane
+
+    - name: "Link /etc/kubernetes/admin.conf to /root/.kube/config"
+      ansible.builtin.file:
+        state: "link"
+        path: "/root/.kube/config"
+        src: "/etc/kubernetes/admin.conf"
+        owner: "root"
+        group: "root"
+      when: inventory_hostname == main_control_plane
+
+    - name: "Install Calico by Creating Necessary Custom Resources"
+      ansible.builtin.shell: "kubectl --kubeconfig=/etc/kubernetes/admin.conf create -f /root/calico-custom-resources.yml >/dev/null 2>&1"
+      when: inventory_hostname == main_control_plane
+      ignore_errors: yes
+
+    - name: "Generate and Save Control Plane Join Command"
+      ansible.builtin.shell: "echo $(kubeadm token create --print-join-command) --control-plane --certificate-key {{ kubeadm_certificate_key }} > /control-plane-join.sh 2> /dev/null"
+      when: inventory_hostname == main_control_plane
+
+    - name: "Generate and Save Node Join Command"
+      ansible.builtin.shell: "kubeadm token create --print-join-command > /node-join.sh 2>/dev/null"
+      when: inventory_hostname == main_control_plane
+
+    - name: "Download Control Plane Join Command"
+      ansible.builtin.fetch:
+        dest: './files/'
+        flat: yes
+        src: '/control-plane-join.sh'
+      when: inventory_hostname == main_control_plane
+
+    - name: "Download Node Join Command"
+      ansible.builtin.fetch:
+        dest: './files/'
+        flat: yes
+        src: '/node-join.sh'
+      when: inventory_hostname == main_control_plane
+
+    - name: Download admin.conf
+      ansible.builtin.fetch:
+        dest: './files/'
+        flat: yes
+        src: '/etc/kubernetes/admin.conf'
+      when: inventory_hostname == main_control_plane
+
+    - name: "Upload Control Plane Join Command"
+      ansible.builtin.copy:
+        src: "./files/control-plane-join.sh"
+        dest: "/control-plane-join.sh"
+        owner: "root"
+        group: "root"
+        mode: "0777"
+      when: inventory_hostname != main_control_plane
+
+    - name: "Join the Control Plane to the Cluster"
+      ansible.builtin.shell: "/control-plane-join.sh > /dev/null 2&>1"
+      when: inventory_hostname != main_control_plane
